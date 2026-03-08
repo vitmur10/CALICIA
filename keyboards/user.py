@@ -105,7 +105,7 @@ def weeks(month: int):
         kb.button(text=' ', callback_data=' ')
 
     for i in range(5 if month in (2, 5, 7, 10) else 4):
-        today = date(year=2025, month=month + 1, day=i * 7 + 1)
+        today = date(year=2026, month=month + 1, day=i * 7 + 1)
         weekday = today.weekday()
 
         start_of_week = today - timedelta(days=weekday)
