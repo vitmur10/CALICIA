@@ -1,14 +1,14 @@
 from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
-
+from aiogram.types import FSInputFile
 from bot.api.swagger import SwaggerCRM
 from bot.config import Config
 from bot.db import Repo
 from bot.filters.admin import AdminFilter, AdminInlineFilter
 import bot.keyboards.admin as kb
-from bot.structrures.callback_data import UserData
-
+from bot.structrures.callback_data import UserData,AdminExtractAllData
+from bot.structrures.bot import generate_all_partners_file
 router = Router()
 router.message.filter(AdminFilter())
 router.callback_query.filter(AdminFilter())
@@ -22,7 +22,53 @@ async def admin_panel(event: Message | CallbackQuery, state: FSMContext):
 
     await action("👑 <b>Адмін-панель</b>: ", reply_markup=kb.menu())
 
+@router.callback_query(F.data == "extract_all_partners")
+async def extract_all_partners_start(query: CallbackQuery):
+    await query.message.edit_text(
+        "📊 <b>Звіт по всіх партнерах</b>\n\nОберіть місяць:",
+        reply_markup=kb.all_partners_months_kb()
+    )
+    await query.answer()
 
+
+@router.callback_query(AdminExtractAllData.filter())
+async def extract_all_partners_process(
+        query: CallbackQuery,
+        callback_data: AdminExtractAllData,
+        repo: Repo,
+        swagger: SwaggerCRM
+):
+    if callback_data.month is not None and callback_data.week is None:
+        await query.message.edit_text(
+            "📅 Оберіть тиждень:",
+            reply_markup=kb.all_partners_weeks(callback_data.month)
+        )
+        await query.answer()
+        return
+
+    if callback_data.week:
+        period = callback_data.week.split(" - ")
+
+        file_name, error = await generate_all_partners_file(
+            swagger=swagger,
+            repo=repo,
+            data=period,
+            year=2026
+        )
+
+        if error:
+            await query.message.answer(error)
+            await query.answer()
+            return
+
+        document = FSInputFile(file_name)
+
+        await query.message.answer_document(
+            document=document,
+            caption=f"📊 Звіт по всіх партнерах\nПеріод: {callback_data.week}"
+        )
+
+        await query.answer()
 @router.inline_query(AdminInlineFilter())
 async def users_inline(query: InlineQuery, repo: Repo):
     data = await repo.get_user_by_request(query.query.replace('user:', ''))

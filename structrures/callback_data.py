@@ -10,3 +10,7 @@ class UserData(CallbackData, prefix="u"):
 class ExtractData(CallbackData, prefix="e"):
     month: int | None = None
     week: str | None = None
+
+class AdminExtractAllData(CallbackData, prefix="aea"):
+    month: int | None = None
+    week: str | None = None
