@@ -486,3 +486,120 @@ async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, d
         return workbook.filename, None
 
     return None, '⚠️Неможливо отримати виписку за цей період, немає замовлень'
+
+async def orders_to_channel(session_factory, swagger: SwaggerCRM, bot: Bot, config: Config):
+    async with session_factory() as session:
+        repo = Repo(session)
+        sources = await swagger.get_request('/order/source', limit=50)
+        sources = {source['id']: source['name'] for source in sources['data'] if source['name'].startswith('посередник') or source['name'] == 'ГЕКТАР'}
+        result = await swagger.get_request(
+            '/order',
+            limit=50,
+            include='shipping, buyer, products.offer, shipping.deliveryService, status', **{
+                "filter[created_between]": f"{(datetime.now().astimezone(timezone.utc) - timedelta(minutes=10)).strftime('%Y-%m-%d %H:%M:%S')}, {(datetime.now().astimezone(timezone.utc)).strftime('%Y-%m-%d %H:%M:%S')}"
+            })
+        if result:
+            for order in result['data']:
+                if order['source_id'] in sources.keys():
+                    goods = '► <b>Товари</b>:'
+                    total = 0
+                    for good in order['products']:
+                        goods += f"\n» {good['name']}:  <b>{good['quantity']} шт. - {good['quantity'] * good['price']} грн.</b>"
+                        total += good['quantity'] * good['price']
+                    msg = await bot.send_message(
+                        chat_id=config.channel.offers,
+                        text=f"🛒 <b>Замовлення #{order['id']} від «{sources[order['source_id']]}»</b>:\n" +
+                             goods +
+                            (f'\n► <b>П.І.Б</b>:  {order["buyer"]["full_name"]}\n'
+                             f'► <b>Номер телефону</b>:  {order["buyer"]["phone"]}\n'
+                             f'► <b>Населений пункт</b>:  {order["shipping"]["address_payload"].get("city_desc") if order["shipping"]["address_payload"] != [] else "!Помилка"}\n'
+                             f'► <b>Відділення</b>:  {order["shipping"]["address_payload"].get("warehouse_desc") if order["shipping"]["address_payload"] != [] else "!Помилка"}\n'
+                             f'► <b>Загальна сума замовлення:  {total} грн.</b>\n') +
+                            (f'► <b>Коментар</b>:  {order["manager_comment"]}\n\n' if order.get("manager_comment") else "")
+                    )
+                    repo.session.add(Order(id=order['id'], msg_id=msg.message_id, buyer=json.dumps(order['buyer']).encode('utf8'), products=json.dumps(order['products']).encode('utf8'), shipping=json.dumps(order["shipping"]).encode('utf8')))
+
+        result = await swagger.get_request(
+            '/order',
+            limit=50,
+            include='shipping, buyer, products.offer, shipping.deliveryService, status', **{
+                "filter[created_between]": f"{(datetime.now().astimezone(timezone.utc) - timedelta(hours=47)).strftime('%Y-%m-%d %H:%M:%S')}, {(datetime.now().astimezone(timezone.utc)).strftime('%Y-%m-%d %H:%M:%S')}"
+            })
+        logging.info(result)
+        orders = []
+        if result:
+            for order in result['data']:
+                orders.append(order['id'])
+                order_db = await repo.get_order(order['id'])
+                if order['source_id'] in sources.keys() and order_db:
+                    if order['status']['alias'] in ('povernennya', 'canceled'):
+                        goods = '► <b>Товари</b>:'
+                        total = 0
+                        for good in order['products']:
+                            goods += f"\n» {good['name']}:  <b>{good['quantity']} шт. - {good['quantity'] * good['price']} грн.</b>"
+                            total += good['quantity'] * good['price']
+                        msg = await bot.edit_message_text(
+                            chat_id=config.channel.offers,
+                            message_id=order_db.msg_id,
+                            text=f"🛒 <b>Замовлення #{order['id']} від «{sources[order['source_id']]}»</b>:\n"
+                                 f"<b>❌ СКАСОВАНО ❌</b>\n" +
+                                 goods +
+                                 (f'\n► <b>П.І.Б</b>:  {order["buyer"]["full_name"]}\n'
+                                  f'► <b>Номер телефону</b>:  {order["buyer"]["phone"]}\n'
+                                  f'► <b>Населений пункт</b>:  {order["shipping"]["address_payload"].get("city_desc") if order["shipping"]["address_payload"] != [] else "!Помилка"}\n'
+                                  f'► <b>Відділення</b>:  {order["shipping"]["address_payload"].get("warehouse_desc") if order["shipping"]["address_payload"] != [] else "!Помилка"}\n'
+                                  f'► <b>Загальна сума замовлення:  {total} грн.</b>\n') +
+                                 (f'► <b>Коментар</b>:  {order["manager_comment"]}\n\n' if order.get(
+                                     "manager_comment") else "")
+                        )
+                        await msg.reply('<b>❌ Замовлення було скасовано! ❌</b>')
+                    elif order['products'] != json.loads(order_db.products.decode()) or order["shipping"]["address_payload"] != json.loads(order_db.shipping.decode()) or order['buyer'] != json.loads(order_db.buyer.decode()):
+                        goods = '► <b>Товари</b>:'
+                        total = 0
+                        for good in order['products']:
+                            goods += f"\n» {good['name']}:  <b>{good['quantity']} шт. - {good['quantity'] * good['price']} грн.</b>"
+                            total += good['quantity'] * good['price']
+                        msg = await bot.edit_message_text(
+                            chat_id=config.channel.offers,
+                            message_id=order_db.msg_id,
+                            text=f"🛒 <b>Замовлення #{order['id']} від «{sources[order['source_id']]}»</b>:\n"
+                                 f"<b>♻️ ВІДБУЛИСЯ ЗМІНИ ♻️</b>\n" +
+                                 goods +
+                                 (f'\n► <b>П.І.Б</b>:  {order["buyer"]["full_name"]}\n'
+                                  f'► <b>Номер телефону</b>:  {order["buyer"]["phone"]}\n'
+                                  f'► <b>Населений пункт</b>:  {order["shipping"]["address_payload"].get("city_desc") if order["shipping"]["address_payload"] != [] else "!Помилка"}\n'
+                                  f'► <b>Відділення</b>:  {order["shipping"]["address_payload"].get("warehouse_desc") if order["shipping"]["address_payload"] != [] else "!Помилка"}\n'
+                                  f'► <b>Загальна сума замовлення:  {total} грн.</b>\n') +
+                                 (f'► <b>Коментар</b>:  {order["manager_comment"]}\n\n' if order.get(
+                                     "manager_comment") else "")
+                        )
+                        await msg.reply('<b>♻️ Замовлення було відредаговано! ♻️</b>')
+                    order_db.buyer = json.dumps(order['buyer']).encode('utf8')
+                    order_db.products = json.dumps(order['products']).encode('utf8')
+                    order_db.shipping = json.dumps(order["shipping"]["address_payload"]).encode('utf8')
+        await repo.session.commit()
+
+        for order in await repo.delete_orders(orders):
+            goods = '► <b>Товари</b>:'
+            total = 0
+            buyer = json.loads(order.buyer.decode())
+            shipping = json.loads(order.shipping.decode())
+
+            for good in json.loads(order.products.decode()):
+                logging.info(good)
+                goods += f"\n» {good['name']}:  <b>{good['quantity']} шт. - {good['quantity'] * good['price']} грн.</b>"
+                total += good['quantity'] * good['price']
+            msg = await bot.edit_message_text(
+                chat_id=config.channel.offers,
+                message_id=order.msg_id,
+                text=f"🛒 <b>Замовлення #{order.id}</b>:\n"
+                     f"<b>🗑 ВИДАЛЕНО 🗑</b>\n" +
+                     goods +
+                     (f'\n► <b>П.І.Б</b>:  {buyer["full_name"]}\n'
+                      f'► <b>Номер телефону</b>:  {buyer["phone"]}\n'
+                      f'► <b>Населений пункт</b>:  {shipping["address_payload"].get("city_desc") if shipping["address_payload"] != [] else "!Помилка"}\n'
+                      f'► <b>Відділення</b>:  {shipping["address_payload"].get("warehouse_desc") if shipping["address_payload"] != [] else "!Помилка"}\n'
+                      f'► <b>Загальна сума замовлення:  {total} грн.</b>\n')
+            )
+            await msg.reply('<b>🗑 Замовлення було видалено! 🗑</b>')
+
