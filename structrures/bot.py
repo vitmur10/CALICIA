@@ -185,7 +185,7 @@ def _write_partner_sheet(
             address = order['shipping']['address_payload']
             if address != []:
                 location = (
-                    f"{f'{address.get('region_desc')}, ' if address.get('region_desc') else ''}"
+                    f"{address.get('region_desc') + ', ' if address.get('region_desc') else ''}"
                     f"{address.get('city_desc')}, {address.get('warehouse_desc')}"
                 )
             else:
