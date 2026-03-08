@@ -42,7 +42,13 @@ class Good(Base):
     image_url: Mapped[str | None] = mapped_column()
     purchased_price: Mapped[int] = mapped_column()
     updated_at: Mapped[str] = mapped_column()
+class PartnerPrice(Base):
+    __tablename__ = "partner_prices"
 
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    partner_source: Mapped[int] = mapped_column(index=True)
+    good_id: Mapped[str] = mapped_column(index=True)
+    price: Mapped[int] = mapped_column()
 
 class Order(Base):
     __tablename__ = 'orders'
@@ -53,3 +59,5 @@ class Order(Base):
     products: Mapped[bytes] = mapped_column(BYTEA)
     shipping: Mapped[bytes] = mapped_column(BYTEA)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now())
+
+

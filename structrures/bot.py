@@ -144,7 +144,16 @@ def _build_formats(workbook):
     return formats
 
 
-def _write_partner_sheet(workbook, worksheet, source_name: str, orders: list, data: list[str], year: int):
+def _write_partner_sheet(
+    workbook,
+    worksheet,
+    source_name: str,
+    orders: list,
+    data: list[str],
+    year: int,
+    partner_prices: dict[str, int] | None = None
+):
+    partner_prices = partner_prices or {}
     formats = _build_formats(workbook)
     _set_columns(worksheet)
 
@@ -211,6 +220,7 @@ def _write_partner_sheet(workbook, worksheet, source_name: str, orders: list, da
 
         for product in order['products']:
             sku = product['sku']
+            partner_price = partner_prices.get(sku, product['purchased_price'])
             if sku not in products_summary:
                 products_summary[sku] = {
                     "name": product['name'],
@@ -230,7 +240,7 @@ def _write_partner_sheet(workbook, worksheet, source_name: str, orders: list, da
 
             worksheet.write_row(
                 f"K{row}",
-                [product['purchased_price'], product['price'], product['price_sold']],
+                [partner_price, product['price'], product['price_sold']],
                 formats["cell_num"]
             )
 
@@ -322,7 +332,16 @@ async def generate_all_partners_file(swagger: SwaggerCRM, repo: Repo, data: list
 
         sheet_name = _safe_sheet_name(f"{source_name}_{data[0]}-{data[1]}")
         worksheet = workbook.add_worksheet(sheet_name)
-        _write_partner_sheet(workbook, worksheet, source_name, source_orders, data, year)
+        partner_prices = await repo.get_partner_prices(source_id)
+        _write_partner_sheet(
+            workbook,
+            worksheet,
+            source_name,
+            source_orders,
+            data,
+            year,
+            partner_prices=partner_prices
+        )
 
     workbook.close()
 

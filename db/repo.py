@@ -4,8 +4,7 @@ from sqlalchemy import select, delete, Sequence, cast, VARCHAR, distinct
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.db.models import User, Good, Order
-
+from bot.db.models import User, Good, Order, PartnerPrice
 
 class BaseRepo:
     def __init__(self, session: AsyncSession) -> None:
@@ -78,3 +77,37 @@ class Repo(BaseRepo):
         res = await self.session.scalars(delete(Order).where(~Order.id.in_(orders)).returning(Order))
         await self.session.commit()
         return res
+
+    async def get_partner_prices(self, partner_source: int) -> dict[str, int]:
+        rows = await self.scalars_all(
+            select(PartnerPrice).where(PartnerPrice.partner_source == partner_source)
+        )
+        return {row.good_id: row.price for row in rows}
+
+    async def get_partner_price(self, partner_source: int, good_id: str) -> int | None:
+        stmt = select(PartnerPrice).where(
+            PartnerPrice.partner_source == partner_source,
+            PartnerPrice.good_id == good_id
+        )
+        result = await self.session.scalar(stmt)
+        return result.price if result else None
+
+    async def upsert_partner_price(self, partner_source: int, good_id: str, price: int):
+        stmt = select(PartnerPrice).where(
+            PartnerPrice.partner_source == partner_source,
+            PartnerPrice.good_id == good_id
+        )
+        row = await self.session.scalar(stmt)
+
+        if row:
+            row.price = price
+        else:
+            self.session.add(
+                PartnerPrice(
+                    partner_source=partner_source,
+                    good_id=good_id,
+                    price=price
+                )
+            )
+
+        await self.session.commit()
