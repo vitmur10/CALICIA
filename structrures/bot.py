@@ -356,7 +356,7 @@ async def generate_all_partners_file(swagger: SwaggerCRM, repo: Repo, data: list
 
 
 async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, data: list):
-    result = await swagger.get_request('/order', limit=50, include='shipping, buyer, products.offer, shipping.deliveryService, status', **{"filter[source_id]": source_id, "filter[created_between]": f"2025-{data[0].replace('.', '-')} 00:00:00, 2025-{data[1].replace('.', '-')} 23:59:59"})
+    result = await swagger.get_request('/order', limit=50, include='shipping, buyer, products.offer, shipping.deliveryService, status', **{"filter[source_id]": source_id, "filter[created_between]": f"2026-{data[0].replace('.', '-')} 00:00:00, 2026-{data[1].replace('.', '-')} 23:59:59"})
     if result['data'] != []:
         workbook = xlsxwriter.Workbook(f'{uuid.uuid4()}.xlsx')
         worksheet = workbook.add_worksheet('Замовлення')
@@ -403,7 +403,7 @@ async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, d
         worksheet.set_column("N0:N0", 16)
 
         worksheet.merge_range("A1:N1", "", merge_format)
-        worksheet.write_rich_string("A1", bold, f"Замовлення: {source_name} ", bold_red, f"(за період 2025.{data[0]} - {data[1]})", merge_format)
+        worksheet.write_rich_string("A1", bold, f"Замовлення: {source_name} ", bold_red, f"(за період 2026.{data[0]} - {data[1]})", merge_format)
         worksheet.write_row("A2",
                             ["№", "Дата", "ПІБ", "Телефон", "Адреса", "ТТН", "Статус", "Код товару", "Назва товару"],
                             bold_italic_color_center)
@@ -471,7 +471,7 @@ async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, d
         worksheet_result.set_column("C0:C0", 24)
 
         worksheet_result.merge_range("A1:C1", "", merge_format)
-        worksheet_result.write_rich_string("A1", bold, f"Підсумок проданих товарів: {source_name} ", bold_red, f"(за період 2025.{data[0]} - {data[1]})", merge_format)
+        worksheet_result.write_rich_string("A1", bold, f"Підсумок проданих товарів: {source_name} ", bold_red, f"(за період 2026.{data[0]} - {data[1]})", merge_format)
 
         worksheet_result.write_row("A2", ["Код товару", "Назва товару", "К-сть (шт.)"], bold_italic_color_center)
         row = 3

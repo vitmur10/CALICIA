@@ -31,7 +31,7 @@ async def extract(query: CallbackQuery, callback_data: ExtractData, user: User, 
     if callback_data.week:
         data = callback_data.week.split(' - ')
         start = data[0].split('.')
-        start_date = date(year=2025, month=int(start[0]), day=int(start[1]))
+        start_date = date(year=2026, month=int(start[0]), day=int(start[1]))
         if start_date > date.today():
             await query.answer('⚠️ Оберіть дату, яка не належить до майбутнього', show_alert=True)
             return
@@ -40,7 +40,7 @@ async def extract(query: CallbackQuery, callback_data: ExtractData, user: User, 
             res = await generate_file(swagger, user.source, user.source_name, data)
             if res[0]:
                 await query.message.delete()
-                await query.message.answer_document(document=FSInputFile(res[0]), caption=f'📁 Виписку за <b>2025.{data[0]} - {data[1]}</b> згенеровано')
+                await query.message.answer_document(document=FSInputFile(res[0]), caption=f'📁 Виписку за <b>2026.{data[0]} - {data[1]}</b> згенеровано')
             else:
                 await query.message.edit_text(res[1], reply_markup=kb.universal('« Назад', 'to_profile'))
 
