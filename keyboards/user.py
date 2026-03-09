@@ -47,6 +47,19 @@ def back(callback_data: CallbackData | str):
 
     return kb.as_markup()
 
+def years_kb():
+    kb = InlineKeyboardBuilder()
+
+    current_year = datetime.now().year
+
+    for year in [current_year, current_year-1, current_year-2]:
+        kb.button(
+            text=str(year),
+            callback_data=ExtractData(year=year)
+        )
+
+    kb.adjust(3)
+    return kb.as_markup()
 
 def inline_switcher(text: str, callback: CallbackData | str):
     kb = InlineKeyboardBuilder()
@@ -91,39 +104,78 @@ def profile():
     return kb.as_markup()
 
 
-def weeks(month: int):
+def weeks(month: int, year: int):
+
     kb = InlineKeyboardBuilder()
 
     if month - 1 >= 0:
-        kb.button(text='«', callback_data=ExtractData(month=month-1))
+        kb.button(
+            text='«',
+            callback_data=ExtractData(
+                year=year,
+                month=month - 1
+            )
+        )
     else:
         kb.button(text=' ', callback_data=' ')
-    kb.button(text=months[month], callback_data=ExtractData())
+
+    kb.button(
+        text=months[month],
+        callback_data=ExtractData(year=year)
+    )
+
     if month + 1 < 12:
-        kb.button(text='»', callback_data=ExtractData(month=month+1))
+        kb.button(
+            text='»',
+            callback_data=ExtractData(
+                year=year,
+                month=month + 1
+            )
+        )
     else:
         kb.button(text=' ', callback_data=' ')
 
     for i in range(5 if month in (2, 5, 7, 10) else 4):
-        today = date(year=2026, month=month + 1, day=i * 7 + 1)
+
+        today = date(
+            year=year,
+            month=month + 1,
+            day=i * 7 + 1
+        )
+
         weekday = today.weekday()
 
         start_of_week = today - timedelta(days=weekday)
+
         end_of_week = start_of_week + timedelta(days=6)
 
-        kb.button(text=f'{start_of_week.day} - {end_of_week.day}', callback_data=ExtractData(month=month, week=f'{str(start_of_week.month).zfill(2)}.{str(start_of_week.day).zfill(2)} - {str(end_of_week.month).zfill(2)}.{str(end_of_week.day).zfill(2)}'))
+        kb.button(
+            text=f'{start_of_week.day} - {end_of_week.day}',
+            callback_data=ExtractData(
+                year=year,
+                month=month,
+                week=f'{str(start_of_week.month).zfill(2)}.{str(start_of_week.day).zfill(2)} - {str(end_of_week.month).zfill(2)}.{str(end_of_week.day).zfill(2)}'
+            )
+        )
 
     kb.button(text='« Назад', callback_data='to_profile')
+
     kb.adjust(3, 2, 2, 1)
 
     return kb.as_markup()
 
+def months_kb(year: int):
 
-def months_kb():
     kb = InlineKeyboardBuilder()
 
-    for month in months:
-        kb.button(text=month, callback_data=ExtractData(month=months.index(month)))
+    for i, month in enumerate(months):
+        kb.button(
+            text=month,
+            callback_data=ExtractData(
+                year=year,
+                month=i
+            )
+        )
 
     kb.adjust(3, 3, 3, 3)
 

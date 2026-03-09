@@ -28,24 +28,80 @@ async def partner_profile(message: Message | CallbackQuery):
 
 @router.callback_query(ExtractData.filter())
 async def extract(query: CallbackQuery, callback_data: ExtractData, user: User, swagger: SwaggerCRM):
-    if callback_data.week:
-        data = callback_data.week.split(' - ')
-        start = data[0].split('.')
-        start_date = date(year=2026, month=int(start[0]), day=int(start[1]))
-        if start_date > date.today():
-            await query.answer('⚠️ Оберіть дату, яка не належить до майбутнього', show_alert=True)
-            return
-        else:
-            await query.message.edit_text('Генеруємо файл...')
-            res = await generate_file(swagger, user.source, user.source_name, data)
-            if res[0]:
-                await query.message.delete()
-                await query.message.answer_document(document=FSInputFile(res[0]), caption=f'📁 Виписку за <b>2026.{data[0]} - {data[1]}</b> згенеровано')
-            else:
-                await query.message.edit_text(res[1], reply_markup=kb.universal('« Назад', 'to_profile'))
 
-    elif callback_data.month or callback_data.month == 0:
-        await query.message.edit_text('⏱️ Оберіть тиждень для виписки: ', reply_markup=kb.weeks(callback_data.month))
+    if callback_data.year is None:
+
+        await query.message.edit_text(
+            "⏱️ Оберіть рік:",
+            reply_markup=kb.years_kb()
+        )
+
+        return
+
+
+    if callback_data.month is None:
+
+        await query.message.edit_text(
+            "⏱️ Оберіть місяць:",
+            reply_markup=kb.months_kb(callback_data.year)
+        )
+
+        return
+
+
+    if callback_data.week is None:
+
+        await query.message.edit_text(
+            "⏱️ Оберіть тиждень:",
+            reply_markup=kb.weeks(callback_data.month, callback_data.year)
+        )
+
+        return
+
+
+    data = callback_data.week.split(' - ')
+
+    if date(
+            year=callback_data.year,
+            month=int(data[0].split('.')[0]),
+            day=int(data[0].split('.')[1])
+    ) > date.today():
+
+        await query.answer(
+            '⚠️ Оберіть дату, яка не належить до майбутнього',
+            show_alert=True
+        )
+
+        return
+
+
+    await query.message.edit_text('Генеруємо файл...')
+
+    res = await generate_file(
+        swagger,
+        user.source,
+        user.source_name,
+        data,
+        callback_data.year
+    )
+
+
+    if res[0]:
+
+        await query.message.delete()
+
+        await query.message.answer_document(
+            document=FSInputFile(res[0]),
+            caption=f'📁 Виписку за <b>{callback_data.year}.{data[0]} - {data[1]}</b> згенеровано'
+        )
+
     else:
-        await query.message.edit_text('⏱️ Оберіть місяць: ', reply_markup=kb.months_kb())
+
+        await query.message.edit_text(
+            res[1],
+            reply_markup=kb.universal(
+                '« Назад',
+                'to_profile'
+            )
+        )
 

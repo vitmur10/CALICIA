@@ -355,8 +355,8 @@ async def generate_all_partners_file(swagger: SwaggerCRM, repo: Repo, data: list
     return workbook.filename, None
 
 
-async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, data: list):
-    result = await swagger.get_request('/order', limit=50, include='shipping, buyer, products.offer, shipping.deliveryService, status', **{"filter[source_id]": source_id, "filter[created_between]": f"2026-{data[0].replace('.', '-')} 00:00:00, 2026-{data[1].replace('.', '-')} 23:59:59"})
+async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, data: list, year: int):
+    result = await swagger.get_request('/order', limit=50, include='shipping, buyer, products.offer, shipping.deliveryService, status', **{"filter[source_id]": source_id, "filter[created_between]": f"{year}-{data[0].replace('.', '-')} 00:00:00, {year}-{data[1].replace('.', '-')} 23:59:59"})
     if result['data'] != []:
         workbook = xlsxwriter.Workbook(f'{uuid.uuid4()}.xlsx')
         worksheet = workbook.add_worksheet('Замовлення')
