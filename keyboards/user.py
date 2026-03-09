@@ -95,10 +95,19 @@ def finish_order():
 
 
 def profile():
-    kb, now = InlineKeyboardBuilder(), datetime.now()
 
-    kb.button(text='⏱️ Виписка', callback_data=ExtractData(month=now.month - 1))
-    kb.button(text='❌ Закрити', callback_data='cancel')
+    kb = InlineKeyboardBuilder()
+
+    kb.button(
+        text="⏱️ Виписка",
+        callback_data="reports_menu"
+    )
+
+    kb.button(
+        text="❌ Закрити",
+        callback_data="cancel"
+    )
+
     kb.adjust(1)
 
     return kb.as_markup()
@@ -178,5 +187,34 @@ def months_kb(year: int):
         )
 
     kb.adjust(3, 3, 3, 3)
+
+    return kb.as_markup()
+
+
+def quick_reports():
+
+    kb = InlineKeyboardBuilder()
+
+    kb.button(
+        text="📅 Цей тиждень",
+        callback_data="report_this_week"
+    )
+
+    kb.button(
+        text="📆 Цей місяць",
+        callback_data="report_this_month"
+    )
+
+    kb.button(
+        text="📊 Цей рік",
+        callback_data="report_this_year"
+    )
+
+    kb.button(
+        text="📁 Вибрати період",
+        callback_data=ExtractData()
+    )
+
+    kb.adjust(1)
 
     return kb.as_markup()

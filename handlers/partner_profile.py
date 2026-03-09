@@ -105,3 +105,108 @@ async def extract(query: CallbackQuery, callback_data: ExtractData, user: User, 
             )
         )
 
+@router.callback_query(F.data == "reports_menu")
+async def reports_menu(query: CallbackQuery):
+
+    await query.message.edit_text(
+        "📊 Оберіть тип звіту:",
+        reply_markup=kb.quick_reports()
+    )
+
+@router.callback_query(F.data == "report_this_week")
+async def report_this_week(query: CallbackQuery, user: User, swagger: SwaggerCRM):
+
+    today = date.today()
+
+    start = today - timedelta(days=today.weekday())
+    end = start + timedelta(days=6)
+
+    data = [
+        f"{str(start.month).zfill(2)}.{str(start.day).zfill(2)}",
+        f"{str(end.month).zfill(2)}.{str(end.day).zfill(2)}"
+    ]
+
+    await query.message.edit_text("Генеруємо файл...")
+
+    res = await generate_file(
+        swagger,
+        user.source,
+        user.source_name,
+        data,
+        today.year
+    )
+
+    if res[0]:
+
+        await query.message.delete()
+
+        await query.message.answer_document(
+            document=FSInputFile(res[0]),
+            caption="📅 Виписка за цей тиждень"
+        )
+
+
+@router.callback_query(F.data == "report_this_month")
+async def report_this_month(query: CallbackQuery, user: User, swagger: SwaggerCRM):
+
+    today = date.today()
+
+    start = date(today.year, today.month, 1)
+
+    if today.month == 12:
+        end = date(today.year, 12, 31)
+    else:
+        end = date(today.year, today.month + 1, 1) - timedelta(days=1)
+
+    data = [
+        f"{str(start.month).zfill(2)}.{str(start.day).zfill(2)}",
+        f"{str(end.month).zfill(2)}.{str(end.day).zfill(2)}"
+    ]
+
+    await query.message.edit_text("Генеруємо файл...")
+
+    res = await generate_file(
+        swagger,
+        user.source,
+        user.source_name,
+        data,
+        today.year
+    )
+
+    if res[0]:
+
+        await query.message.delete()
+
+        await query.message.answer_document(
+            document=FSInputFile(res[0]),
+            caption="📆 Виписка за цей місяць"
+        )
+
+@router.callback_query(F.data == "report_this_year")
+async def report_this_year(query: CallbackQuery, user: User, swagger: SwaggerCRM):
+
+    today = date.today()
+
+    data = [
+        "01.01",
+        "12.31"
+    ]
+
+    await query.message.edit_text("Генеруємо файл...")
+
+    res = await generate_file(
+        swagger,
+        user.source,
+        user.source_name,
+        data,
+        today.year
+    )
+
+    if res[0]:
+
+        await query.message.delete()
+
+        await query.message.answer_document(
+            document=FSInputFile(res[0]),
+            caption="📊 Виписка за рік"
+        )
