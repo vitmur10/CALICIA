@@ -296,17 +296,30 @@ def _write_partner_sheet(
 
 
 async def generate_all_partners_file(swagger: SwaggerCRM, repo: Repo, data: list[str], year: int):
-    partners = await repo.get_partner_sources()
+    sources_response = await swagger.get_request('/order/source', limit=50)
 
-    if not partners:
-        return None, "⚠️ Не знайдено партнерів із прив'язаними source/source_name"
+    if not sources_response or not sources_response.get("data"):
+        return None, "⚠️ Не вдалося отримати джерела замовлень"
+
+    allowed_sources = []
+    extra_ids = {5, 39}
+
+    for source in sources_response["data"]:
+        source_name = (source.get("name") or "").strip().lower()
+        source_id = source.get("id")
+
+        if source_name.startswith("посередник") or source_id in extra_ids:
+            allowed_sources.append((source_id, source.get("name")))
+
+    if not allowed_sources:
+        return None, "⚠️ Не знайдено джерел для формування звіту"
 
     workbook = xlsxwriter.Workbook(f"{uuid.uuid4()}.xlsx")
 
     has_any_orders = False
     period = _build_period(year, data)
 
-    for source_id, source_name in partners:
+    for source_id, source_name in allowed_sources:
         result = await swagger.get_request(
             '/order',
             limit=50,
@@ -318,9 +331,11 @@ async def generate_all_partners_file(swagger: SwaggerCRM, repo: Repo, data: list
         )
 
         source_orders = []
+
         while result:
             source_orders.extend(result.get("data", []))
             next_page_url = result.get("next_page_url")
+
             if next_page_url:
                 result = await swagger.get_request_url(next_page_url)
             else:
@@ -331,7 +346,9 @@ async def generate_all_partners_file(swagger: SwaggerCRM, repo: Repo, data: list
 
         sheet_name = _safe_sheet_name(f"{source_name}_{data[0]}-{data[1]}")
         worksheet = workbook.add_worksheet(sheet_name)
+
         partner_prices = await repo.get_partner_prices(source_id)
+
         _write_partner_sheet(
             workbook,
             worksheet,
@@ -353,8 +370,6 @@ async def generate_all_partners_file(swagger: SwaggerCRM, repo: Repo, data: list
         return None, "⚠️ Немає замовлень у жодного партнера за цей період"
 
     return workbook.filename, None
-
-
 async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, data: list, year: int):
     result = await swagger.get_request('/order', limit=50, include='shipping, buyer, products.offer, shipping.deliveryService, status', **{"filter[source_id]": source_id, "filter[created_between]": f"{year}-{data[0].replace('.', '-')} 00:00:00, {year}-{data[1].replace('.', '-')} 23:59:59"})
     if result['data'] != []:
