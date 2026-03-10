@@ -295,7 +295,91 @@ def _write_partner_sheet(
         )
         summary_row += 1
 
+async def generate_all_partners_file(swagger: SwaggerCRM, repo: Repo, data: list[str], year: int):
 
+    sources_response = await swagger.get_request('/order/source', limit=50)
+
+    if not sources_response or not sources_response.get("data"):
+        return None, "⚠️ Не вдалося отримати джерела замовлень"
+
+    # завантажуємо ціни з Google один раз
+    google_prices = google_loader.get_prices()
+
+    allowed_sources = []
+    extra_ids = {5, 39}
+
+    for source in sources_response["data"]:
+        source_name = (source.get("name") or "").strip().lower()
+        source_id = source.get("id")
+
+        if source_name.startswith("посередник") or source_id in extra_ids:
+            allowed_sources.append((source_id, source.get("name")))
+
+    if not allowed_sources:
+        return None, "⚠️ Не знайдено джерел для формування звіту"
+
+    workbook = xlsxwriter.Workbook(f"{uuid.uuid4()}.xlsx")
+
+    has_any_orders = False
+    period = _build_period(year, data)
+
+    for source_id, source_name in allowed_sources:
+
+        result = await swagger.get_request(
+            '/order',
+            limit=50,
+            include='shipping, buyer, products.offer, shipping.deliveryService, status',
+            **{
+                "filter[source_id]": source_id,
+                "filter[created_between]": period
+            }
+        )
+
+        source_orders = []
+
+        while result:
+            source_orders.extend(result.get("data", []))
+            next_page_url = result.get("next_page_url")
+
+            if next_page_url:
+                result = await swagger.get_request_url(next_page_url)
+            else:
+                result = None
+
+        if source_orders:
+            has_any_orders = True
+
+        sheet_name = _safe_sheet_name(f"{source_name}_{data[0]}-{data[1]}")
+        worksheet = workbook.add_worksheet(sheet_name)
+
+        # стандартні ціни партнерів
+        partner_prices = await repo.get_partner_prices(source_id)
+
+        # якщо це партнер 8 → беремо Google ціни
+        if source_id == 8:
+            partner_prices = google_prices
+
+        _write_partner_sheet(
+            workbook,
+            worksheet,
+            source_name,
+            source_orders,
+            data,
+            year,
+            partner_prices=partner_prices
+        )
+
+    workbook.close()
+
+    if not has_any_orders:
+        try:
+            import os
+            os.remove(workbook.filename)
+        except Exception:
+            pass
+        return None, "⚠️ Немає замовлень у жодного партнера за цей період"
+
+    return workbook.filename, None
 async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, data: list, year: int):
 
     result = await swagger.get_request(
