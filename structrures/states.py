@@ -7,6 +7,9 @@ class NewOrder(StatesGroup):
     amount = State()
     fullname = State()
     phone = State()
+
+    delivery_service = State()
+
     city = State()
     warehouse = State()
     comment = State()

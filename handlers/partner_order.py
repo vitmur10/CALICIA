@@ -22,8 +22,48 @@ router = Router()
 
 router.message.filter(PartnerFilter())
 router.callback_query.filter(PartnerFilter())
+DELIVERY_SERVICE_MAP = {
+    "nova_poshta": {
+        "id": 2,
+        "name": "Нова Пошта",
+        "supports_ref": True,
+    },
+    "ukrposhta": {
+        "id": 22,
+        "name": "Укрпошта",
+        "supports_ref": False,
+    },
+    "meest": {
+        "id": 23,
+        "name": "Meest Express",
+        "supports_ref": False,
+    },
+    "rozetka": {
+        "id": 26,
+        "name": "Rozetka Delivery",
+        "supports_ref": False,
+    },
+}
+def build_shipping_payload(state_data: dict) -> dict:
+    delivery = state_data["delivery_service"]
 
+    shipping = {
+        "delivery_service_id": delivery["id"],
+        "shipping_service": delivery["name"],
+        "recipient_full_name": state_data["fullname"],
+        "recipient_phone": state_data["phone"],
+        "shipping_address_city": state_data["city"]["name"],
+        "shipping_receive_point": state_data["warehouse"]["name"],
+    }
 
+    warehouse_ref = state_data.get("warehouse", {}).get("ref")
+    if warehouse_ref:
+        shipping["warehouse_ref"] = warehouse_ref
+
+    return shipping
+
+def calc_price_sum(goods: dict) -> int:
+    return sum(item["price"] * item["amount"] for item in goods.values())
 @router.message(F.text == '🛒 Замовлення')
 async def add_order(message: Message, state: FSMContext):
     await state.clear()
@@ -72,32 +112,53 @@ async def to_phone(query: CallbackQuery, state: FSMContext):
     state_data = await state.get_data()
     await state.set_state(NewOrder.phone)
 
-    await query.message.edit_text(text=state_data['text'] + f'\n► <b>П.І.Б</b>:  {state_data["fullname"]}\n\n► Уведіть номер телефону клієнта:', reply_markup=kb.back('to_fullname'))
-
-
+    await query.message.edit_text(
+        text=state_data['text']
+             + f'\n► П.І.Б: {state_data["fullname"]}'
+             + '\n\n► Уведіть номер телефону клієнта:',
+        reply_markup=kb.back('to_fullname')
+    )
 @router.message(NewOrder.phone)
 async def new_order_phone(message: Message, state: FSMContext, bot: Bot):
     await message.delete()
     state_data = await state.get_data()
 
     try:
-        phone = message.text
+        phone = message.text.strip()
+
         if phone.startswith('0'):
             phone = '+38' + phone
         elif phone.startswith('380'):
-            phone = phone.replace('380', '+380')
-        if len(phone) == 13:
-            await state.update_data(phone=phone)
-            await state.set_state(NewOrder.city)
+            phone = '+' + phone
 
-            await bot.edit_message_text(chat_id=message.from_user.id, message_id=state_data['msg_id'], text=state_data['text'] + f'\n► <b>П.І.Б</b>:  {state_data["fullname"]}\n► <b>Номер телефону</b>:  {phone}\n\n► Оберіть пункт доставки: ', reply_markup=kb.inline_switcher('Пошук населених пунктів', 'to_phone'))
-        else:
+        if len(phone) != 13:
             raise ValueError
+
+        await state.update_data(phone=phone)
+        await state.set_state(NewOrder.delivery_service)
+
+        await bot.edit_message_text(
+            chat_id=message.from_user.id,
+            message_id=state_data['msg_id'],
+            text=state_data['text']
+                 + f'\n► П.І.Б: {state_data["fullname"]}'
+                 + f'\n► Номер телефону: {phone}'
+                 + '\n\n► Оберіть службу доставки:',
+            reply_markup=kb.delivery_services()
+        )
     except ValueError:
-        await bot.edit_message_text(chat_id=message.from_user.id, message_id=state_data['msg_id'], text=f'⚠️Зверніть увагу, номер телефону має складатися з <b>трьох цифр</b> коду країни та <b>дев\'яти цифр</b> самого номеру і бути в одному з наступних форматів:\n\n'
-                                                                                                        f'► +380933230302\n'
-                                                                                                        f'► 380933230302\n'
-                                                                                                        f'► 0933230302', reply_markup=kb.back('to_fullname'))
+        await bot.edit_message_text(
+            chat_id=message.from_user.id,
+            message_id=state_data['msg_id'],
+            text=(
+                f'⚠️Зверніть увагу, номер телефону має складатися з трьох цифр коду країни '
+                f'та дев\'яти цифр самого номеру і бути в одному з наступних форматів:\n\n'
+                f'► +380933230302\n'
+                f'► 380933230302\n'
+                f'► 0933230302'
+            ),
+            reply_markup=kb.back('to_fullname')
+        )
 
 
 @router.inline_query(NewOrder.city)
@@ -117,29 +178,105 @@ async def search_city(query: InlineQuery, np: NovaPoshta):
     except UnboundLocalError:
         pass
 
+@router.callback_query(F.data == 'to_delivery_service')
+async def to_delivery_service(query: CallbackQuery, state: FSMContext):
+    state_data = await state.get_data()
+    await state.set_state(NewOrder.delivery_service)
 
+    await query.message.edit_text(
+        text=state_data['text']
+             + f'\n► П.І.Б: {state_data["fullname"]}'
+             + f'\n► Номер телефону: {state_data["phone"]}'
+             + '\n\n► Оберіть службу доставки:',
+        reply_markup=kb.delivery_services()
+    )
 @router.callback_query(F.data == 'to_city')
 async def to_city(query: CallbackQuery, state: FSMContext):
     state_data = await state.get_data()
+    delivery = state_data['delivery_service']
+
     await state.set_state(NewOrder.city)
 
-    await query.message.edit_text(text=state_data['text'] + f'\n► <b>П.І.Б</b>:  {state_data["fullname"]}\n► <b>Номер телефону</b>:  {state_data["phone"]}\n\n► Оберіть пункт доставки: ', reply_markup=kb.inline_switcher('Пошук населених пунктів', 'to_phone'))
-
+    if delivery['key'] == 'nova_poshta':
+        await query.message.edit_text(
+            text=state_data['text']
+                 + f'\n► П.І.Б: {state_data["fullname"]}'
+                 + f'\n► Номер телефону: {state_data["phone"]}'
+                 + f'\n► Служба доставки: {delivery["name"]}'
+                 + '\n\n► Оберіть населений пункт:',
+            reply_markup=kb.inline_switcher('Пошук населених пунктів', 'to_delivery_service')
+        )
+    else:
+        await query.message.edit_text(
+            text=state_data['text']
+                 + f'\n► П.І.Б: {state_data["fullname"]}'
+                 + f'\n► Номер телефону: {state_data["phone"]}'
+                 + f'\n► Служба доставки: {delivery["name"]}'
+                 + '\n\n► Уведіть населений пункт:',
+            reply_markup=kb.back('to_delivery_service')
+        )
 
 @router.message(NewOrder.city)
 async def new_order_city(message: Message, state: FSMContext, bot: Bot):
     await message.delete()
     state_data = await state.get_data()
-    try:
-        city = message.text.split(' | ')
-        city[1]
+    delivery = state_data['delivery_service']
+
+    if delivery['key'] == 'nova_poshta':
+        try:
+            city = message.text.split(' | ')
+            city[1]
+
+            await state.update_data(city={'name': city[0], 'ref': city[1]})
+            await state.set_state(NewOrder.warehouse)
+
+            await bot.edit_message_text(
+                chat_id=message.from_user.id,
+                message_id=state_data['msg_id'],
+                text=state_data['text']
+                     + f'\n► П.І.Б: {state_data["fullname"]}'
+                     + f'\n► Номер телефону: {state_data["phone"]}'
+                     + f'\n► Служба доставки: {delivery["name"]}'
+                     + f'\n► Населений пункт: {city[0]}'
+                     + '\n\n► Оберіть відділення доставки:',
+                reply_markup=kb.inline_switcher('Пошук відділення', 'to_city')
+            )
+        except:
+            await bot.edit_message_text(
+                chat_id=message.from_user.id,
+                message_id=state_data['msg_id'],
+                text='⚠️ Знайдено декілька чи жодного населених пунктів, уведіть дані у форматі:\n'
+                     '► Назва населеного пункту | Ідентифікатор населеного пункту'
+                     '\n\nПриклад:\n'
+                     '► Одеса | 6bef146c-1d5a-11e3-8c4a-0050568002cf',
+                reply_markup=kb.back('to_city')
+            )
+    else:
+        city_name = message.text.strip()
+
+        if not city_name:
+            await bot.edit_message_text(
+                chat_id=message.from_user.id,
+                message_id=state_data['msg_id'],
+                text='⚠️ Уведіть коректний населений пункт.',
+                reply_markup=kb.back('to_city')
+            )
+            return
+
+        await state.update_data(city={'name': city_name, 'ref': None})
         await state.set_state(NewOrder.warehouse)
 
-        await state.update_data(city={'name': city[0], 'ref': city[1]})
-        await bot.edit_message_text(chat_id=message.from_user.id, message_id=state_data['msg_id'], text=state_data['text'] + f'\n► <b>П.І.Б</b>:  {state_data["fullname"]}\n► <b>Номер телефону</b>:  {state_data["phone"]}\n► <b>Населений пункт</b>:  {city[0]}\n\n► Оберіть відділення доставки:', reply_markup=kb.inline_switcher('Пошук відділення', 'to_city'))
-    except:
-        await bot.edit_message_text(chat_id=message.from_user.id, message_id=state_data['msg_id'], text=state_data['text'] + f'\n► <b>П.І.Б</b>:  {state_data["fullname"]}\n► <b>Номер телефону</b>:  {state_data["phone"]}\n\n► Оберіть пункт доставки: \n\n⚠️Після натискання кнопки, впишіть запит для пошуку населеного пункту', reply_markup=kb.inline_switcher('Пошук населених пунктів', 'to_phone'))
-
+        await bot.edit_message_text(
+            chat_id=message.from_user.id,
+            message_id=state_data['msg_id'],
+            text=state_data['text']
+                 + f'\n► П.І.Б: {state_data["fullname"]}'
+                 + f'\n► Номер телефону: {state_data["phone"]}'
+                 + f'\n► Служба доставки: {delivery["name"]}'
+                 + f'\n► Населений пункт: {city_name}'
+                 + '\n\n► Уведіть відділення / точку видачі:',
+            reply_markup=kb.back('to_city')
+        )
 
 @router.inline_query(NewOrder.warehouse)
 async def search_warehouse(query: InlineQuery, np: NovaPoshta, state: FSMContext):
@@ -160,53 +297,210 @@ async def search_warehouse(query: InlineQuery, np: NovaPoshta, state: FSMContext
 @router.callback_query(F.data == 'to_warehouse')
 async def to_warehouse(query: CallbackQuery, state: FSMContext):
     state_data = await state.get_data()
+    delivery = state_data['delivery_service']
+
     await state.set_state(NewOrder.warehouse)
 
-    await query.message.edit_text(text=state_data['text'] + f'\n► <b>П.І.Б</b>:  {state_data["fullname"]}\n► <b>Номер телефону</b>:  {state_data["phone"]}\n► <b>Населений пункт</b>:  {state_data["city"]["name"]}\n\n► Оберіть відділення доставки:', reply_markup=kb.inline_switcher('Пошук відділення', 'to_city'))
+    if delivery['key'] == 'nova_poshta':
+        await query.message.edit_text(
+            text=state_data['text']
+                 + f'\n► П.І.Б: {state_data["fullname"]}'
+                 + f'\n► Номер телефону: {state_data["phone"]}'
+                 + f'\n► Служба доставки: {delivery["name"]}'
+                 + f'\n► Населений пункт: {state_data["city"]["name"]}'
+                 + '\n\n► Оберіть відділення доставки:',
+            reply_markup=kb.inline_switcher('Пошук відділення', 'to_city')
+        )
+    else:
+        await query.message.edit_text(
+            text=state_data['text']
+                 + f'\n► П.І.Б: {state_data["fullname"]}'
+                 + f'\n► Номер телефону: {state_data["phone"]}'
+                 + f'\n► Служба доставки: {delivery["name"]}'
+                 + f'\n► Населений пункт: {state_data["city"]["name"]}'
+                 + '\n\n► Уведіть відділення / точку видачі:',
+            reply_markup=kb.back('to_city')
+        )
+@router.callback_query(F.data.startswith('delivery:'))
+async def choose_delivery_service(query: CallbackQuery, state: FSMContext):
+    key = query.data.split(':', 1)[1]
+    service = DELIVERY_SERVICE_MAP[key]
 
+    await state.update_data(
+        delivery_service={
+            'key': key,
+            'id': service['id'],
+            'name': service['name'],
+            'supports_ref': service['supports_ref'],
+        }
+    )
+    await state.set_state(NewOrder.city)
 
+    state_data = await state.get_data()
+
+    if key == 'nova_poshta':
+        text = (
+            state_data['text']
+            + f'\n► П.І.Б: {state_data["fullname"]}'
+            + f'\n► Номер телефону: {state_data["phone"]}'
+            + f'\n► Служба доставки: {service["name"]}'
+            + '\n\n► Оберіть населений пункт:'
+        )
+        markup = kb.inline_switcher('Пошук населених пунктів', 'to_delivery_service')
+    else:
+        text = (
+            state_data['text']
+            + f'\n► П.І.Б: {state_data["fullname"]}'
+            + f'\n► Номер телефону: {state_data["phone"]}'
+            + f'\n► Служба доставки: {service["name"]}'
+            + '\n\n► Уведіть населений пункт:'
+        )
+        markup = kb.back('to_delivery_service')
+
+    await query.message.edit_text(
+        text=text,
+        reply_markup=markup
+    )
 @router.message(NewOrder.warehouse)
 async def new_order_warehouse(message: Message, state: FSMContext, bot: Bot):
     await message.delete()
     state_data = await state.get_data()
-    try:
-        warehouse = message.text.split(' | ')
-        warehouse[1]
-        goods = state_data['goods']
-        price_sum = sum(goods[good]['price'] * goods[good]['amount'] for good in goods.keys())
+    delivery = state_data['delivery_service']
+    goods = state_data['goods']
+    price_sum = calc_price_sum(goods)
+
+    if delivery['key'] == 'nova_poshta':
+        try:
+            warehouse = message.text.split(' | ')
+            warehouse[1]
+
+            await state.update_data(
+                warehouse={'name': warehouse[0], 'ref': warehouse[1]},
+                price_sum=price_sum
+            )
+            await state.set_state(NewOrder.comment)
+
+            await bot.edit_message_text(
+                chat_id=message.from_user.id,
+                message_id=state_data['msg_id'],
+                text=state_data['text']
+                     + f'\n► П.І.Б: {state_data["fullname"]}'
+                     + f'\n► Номер телефону: {state_data["phone"]}'
+                     + f'\n► Служба доставки: {delivery["name"]}'
+                     + f'\n► Населений пункт: {state_data["city"]["name"]}'
+                     + f'\n► Відділення: {warehouse[0]}'
+                     + f'\n► Загальна сума замовлення: {price_sum} грн.'
+                     + '\n\n► Уведіть коментар до замовлення або натисніть "Пропустити":',
+                reply_markup=kb.comment_order()
+            )
+        except Exception:
+            await bot.edit_message_text(
+                chat_id=message.from_user.id,
+                message_id=state_data['msg_id'],
+                text='⚠️ Знайдено декілька чи жодного відділень, уведіть дані у форматі:\n'
+                     '► Назва відділення | Ідентифікатор відділення'
+                     '\n\nПриклад:\n'
+                     '► Відділення №1: вул. Приклад, 10 | 12345678-1234-1234-1234-123456789012',
+                reply_markup=kb.back('to_warehouse')
+            )
+    else:
+        warehouse_name = message.text.strip()
+
+        if not warehouse_name:
+            await bot.edit_message_text(
+                chat_id=message.from_user.id,
+                message_id=state_data['msg_id'],
+                text='⚠️ Уведіть коректне відділення або точку видачі.',
+                reply_markup=kb.back('to_warehouse')
+            )
+            return
+
+        await state.update_data(
+            warehouse={'name': warehouse_name, 'ref': None},
+            price_sum=price_sum
+        )
         await state.set_state(NewOrder.comment)
 
-        await state.update_data(warehouse={'name': warehouse[0], 'ref': warehouse[1]}, price_sum=price_sum)
-        await bot.edit_message_text(chat_id=message.from_user.id, message_id=state_data['msg_id'], text=state_data['text'] + f'\n► <b>П.І.Б</b>:  {state_data["fullname"]}\n► <b>Номер телефону</b>:  {state_data["phone"]}\n► <b>Населений пункт</b>:  {state_data["city"]["name"]}\n► <b>Відділення</b>:  {warehouse[0]}\n► <b>Загальна сума замовлення:  {price_sum} грн.</b>\n\n► Уведіть коментар до замовлення або натисніть "Пропустити":', reply_markup=kb.comment_order())
-    except:
-        await bot.edit_message_text(chat_id=message.from_user.id, message_id=state_data['msg_id'], text=state_data['text'] + f'\n► <b>П.І.Б</b>:  {state_data["fullname"]}\n► <b>Номер телефону</b>:  {state_data["phone"]}\n► <b>Населений пункт</b>:  {state_data["city"]["name"]}\n\n► Оберіть відділення доставки:\n\n⚠️Після натискання кнопки, впишіть запит для пошуку відділення', reply_markup=kb.inline_switcher('Пошук відділення', 'to_city'))
-
+        await bot.edit_message_text(
+            chat_id=message.from_user.id,
+            message_id=state_data['msg_id'],
+            text=state_data['text']
+                 + f'\n► П.І.Б: {state_data["fullname"]}'
+                 + f'\n► Номер телефону: {state_data["phone"]}'
+                 + f'\n► Служба доставки: {delivery["name"]}'
+                 + f'\n► Населений пункт: {state_data["city"]["name"]}'
+                 + f'\n► Відділення: {warehouse_name}'
+                 + f'\n► Загальна сума замовлення: {price_sum} грн.'
+                 + '\n\n► Уведіть коментар до замовлення або натисніть "Пропустити":',
+            reply_markup=kb.comment_order()
+        )
 
 @router.callback_query(F.data == 'skip_comment')
 async def skip_comment(query: CallbackQuery, state: FSMContext):
     state_data = await state.get_data()
+    delivery = state_data['delivery_service']
+
     await state.set_state()
 
-    await query.message.edit_text(state_data['text'] + f'\n► <b>П.І.Б</b>:  {state_data["fullname"]}\n► <b>Номер телефону</b>:  {state_data["phone"]}\n► <b>Населений пункт</b>:  {state_data["city"]["name"]}\n► <b>Відділення</b>:  {state_data["warehouse"]["name"]}\n► <b>Загальна сума замовлення:  {state_data["price_sum"]} грн.</b>\n\n► Ви дійсно бажаєте додати це замовлення?', reply_markup=kb.finish_order())
-
-
+    await query.message.edit_text(
+        state_data['text']
+        + f'\n► П.І.Б: {state_data["fullname"]}'
+        + f'\n► Номер телефону: {state_data["phone"]}'
+        + f'\n► Служба доставки: {delivery["name"]}'
+        + f'\n► Населений пункт: {state_data["city"]["name"]}'
+        + f'\n► Відділення: {state_data["warehouse"]["name"]}'
+        + f'\n► Загальна сума замовлення: {state_data["price_sum"]} грн.'
+        + '\n\n► Ви дійсно бажаєте додати це замовлення?',
+        reply_markup=kb.finish_order()
+    )
 @router.callback_query(F.data == 'to_comment')
 async def to_comment(query: CallbackQuery, state: FSMContext):
     state_data = await state.get_data()
+    delivery = state_data['delivery_service']
+
     await state.set_state(NewOrder.comment)
 
-    await query.message.edit_text(state_data['text'] + f'\n► <b>П.І.Б</b>:  {state_data["fullname"]}\n► <b>Номер телефону</b>:  {state_data["phone"]}\n► <b>Населений пункт</b>:  {state_data["city"]["name"]}\n► <b>Відділення</b>:  {state_data["warehouse"]["name"]}\n► <b>Загальна сума замовлення:  {state_data["price_sum"]} грн.</b>\n\n► Уведіть коментар до замовлення або натисніть "Пропустити":', reply_markup=kb.comment_order())
-
+    await query.message.edit_text(
+        state_data['text']
+        + f'\n► П.І.Б: {state_data["fullname"]}'
+        + f'\n► Номер телефону: {state_data["phone"]}'
+        + f'\n► Служба доставки: {delivery["name"]}'
+        + f'\n► Населений пункт: {state_data["city"]["name"]}'
+        + f'\n► Відділення: {state_data["warehouse"]["name"]}'
+        + f'\n► Загальна сума замовлення: {state_data["price_sum"]} грн.'
+        + '\n\n► Уведіть коментар до замовлення або натисніть "Пропустити":',
+        reply_markup=kb.comment_order()
+    )
 
 @router.message(NewOrder.comment)
 async def new_order_comment(message: Message, state: FSMContext, bot: Bot):
     await message.delete()
     state_data = await state.get_data()
+    delivery = state_data['delivery_service']
+
+    comment = message.text.strip()
+    if comment == '-':
+        comment = None
+
     await state.set_state()
+    await state.update_data(comment=comment)
 
-    await state.update_data(comment=message.text)
-    await bot.edit_message_text(chat_id=message.from_user.id, message_id=state_data['msg_id'], text=state_data['text'] + f'\n► <b>П.І.Б</b>:  {state_data["fullname"]}\n► <b>Номер телефону</b>:  {state_data["phone"]}\n► <b>Населений пункт</b>:  {state_data["city"]["name"]}\n► <b>Відділення</b>:  {state_data["warehouse"]["name"]}\n► <b>Загальна сума замовлення:  {state_data["price_sum"]} грн.</b>\n► <b>Коментар</b>:  {message.text}\n\n► Ви дійсно бажаєте додати це замовлення?', reply_markup=kb.finish_order())
+    comment_text = comment if comment else '—'
 
+    await bot.edit_message_text(
+        chat_id=message.from_user.id,
+        message_id=state_data['msg_id'],
+        text=state_data['text']
+             + f'\n► П.І.Б: {state_data["fullname"]}'
+             + f'\n► Номер телефону: {state_data["phone"]}'
+             + f'\n► Служба доставки: {delivery["name"]}'
+             + f'\n► Населений пункт: {state_data["city"]["name"]}'
+             + f'\n► Відділення: {state_data["warehouse"]["name"]}'
+             + f'\n► Загальна сума замовлення: {state_data["price_sum"]} грн.'
+             + f'\n► Коментар: {comment_text}'
+             + '\n\n► Ви дійсно бажаєте додати це замовлення?',
+        reply_markup=kb.finish_order()
+    )
 
 @router.message(NewOrder.goods)
 async def new_order_goods(message: Message, repo: Repo, state: FSMContext, bot: Bot):
@@ -266,39 +560,51 @@ async def new_order_amount(message: Message, state: FSMContext, bot: Bot):
 
 
 @router.callback_query(F.data == 'add_order')
-async def add_order(query: CallbackQuery, state: FSMContext, swagger: SwaggerCRM, config: Config, user: User, bot: Bot):
+async def add_order(
+    query: CallbackQuery,
+    state: FSMContext,
+    swagger: SwaggerCRM,
+    config: Config,
+    user: User,
+    bot: Bot
+):
     state_data = await state.get_data()
 
-    res = await swagger.post_request('/order',
-                                     source_id=user.source,
-                                     source_uuid=str(uuid.uuid4()),
-                                     manager_id=6,
-                                     manager_comment=state_data.get('comment'),
-                                     ordered_at=datetime.now(tz=pytz.timezone('Europe/Kiev')).strftime('%Y-%m-%d %H:%M:%S'),
-                                     buyer={
-                                         "full_name": state_data['fullname'],
-                                         "phone": f'{state_data["phone"]}'
-                                     },
-                                     products=[
-                                         {
-                                             "sku": product,
-                                             "price": state_data["goods"][product]['price'],
-                                             "quantity": state_data["goods"][product]['amount']
-                                         } for product in state_data["goods"].keys()
-                                     ],
-                                     shipping={
-                                          "delivery_service_id": 2,
-                                          "shipping_service": "Нова Пошта",
-                                          "recipient_full_name": f"{state_data['fullname']}",
-                                          "recipient_phone": f"{state_data['phone']}",
-                                          "warehouse_ref": f"{state_data['warehouse']['ref']}"
-                                     })
-    if not res.get('errors'):
-        await state.clear()
-        await query.message.delete()
-        await query.message.answer(f'🛒 Замовлення <b>№{res["id"]}</b> успішно додано!', reply_markup=kb.menu())
+    shipping = build_shipping_payload(state_data)
+
+    res = await swagger.post_request(
+        '/order',
+        source_id=user.source,
+        source_uuid=str(uuid.uuid4()),
+        manager_id=6,
+        manager_comment=state_data.get('comment'),
+        ordered_at=datetime.now(
+            tz=pytz.timezone('Europe/Kiev')
+        ).strftime('%Y-%m-%d %H:%M:%S'),
+        buyer={
+            "full_name": state_data['fullname'],
+            "phone": state_data["phone"],
+        },
+        products=[
+            {
+                "sku": product,
+                "price": state_data["goods"][product]['price'],
+                "quantity": state_data["goods"][product]['amount']
+            }
+            for product in state_data["goods"].keys()
+        ],
+        shipping=shipping
+    )
+
+    await state.clear()
+
+    if res.get('status_code') in (200, 201) or res.get('id'):
+        await query.message.edit_text(
+            '✅ Замовлення успішно створено.',
+            reply_markup=kb.start_order()
+        )
     else:
-        await query.message.delete()
-        await query.message.answer(f'⛔️ Помилка при додаванні замовлення', reply_markup=kb.menu())
-        await bot.send_message(chat_id=config.channel.errors, text=f"⛔️ Помилка при додаванні замовлення, користувач {query.from_user.full_name} - <code>{query.from_user.id}</code>\n"
-                                                                   f"{res['errors']}")
+        await query.message.edit_text(
+            f'⚠️ Не вдалося створити замовлення.\n\nВідповідь CRM:\n{res}',
+            reply_markup=kb.start_order()
+        )

@@ -47,6 +47,15 @@ def back(callback_data: CallbackData | str):
 
     return kb.as_markup()
 
+def delivery_services():
+    kb = InlineKeyboardBuilder()
+    kb.button(text='Нова Пошта', callback_data='delivery:nova_poshta')
+    kb.button(text='Укрпошта', callback_data='delivery:ukrposhta')
+    kb.button(text='Meest Express', callback_data='delivery:meest')
+    kb.button(text='Rozetka Delivery', callback_data='delivery:rozetka')
+    kb.button(text='❌ Відхилити', callback_data='cancel')
+    kb.adjust(1)
+    return kb.as_markup()
 def years_kb():
     kb = InlineKeyboardBuilder()
 
