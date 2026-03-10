@@ -11,7 +11,8 @@ from bot.api.swagger import SwaggerCRM
 from bot.config import Config
 from bot.db import Repo
 from bot.db.models import Order
-
+from bot.api.google_sheets import GoogleSheetsPriceLoader
+google_loader = GoogleSheetsPriceLoader()
 months = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень']
 months_length = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 status = {
@@ -295,213 +296,142 @@ def _write_partner_sheet(
         summary_row += 1
 
 
-async def generate_all_partners_file(swagger: SwaggerCRM, repo: Repo, data: list[str], year: int):
-    sources_response = await swagger.get_request('/order/source', limit=50)
+async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, data: list, year: int):
 
-    if not sources_response or not sources_response.get("data"):
-        return None, "⚠️ Не вдалося отримати джерела замовлень"
+    result = await swagger.get_request(
+        '/order',
+        limit=50,
+        include='shipping, buyer, products.offer, shipping.deliveryService, status',
+        **{
+            "filter[source_id]": source_id,
+            "filter[created_between]": f"{year}-{data[0].replace('.', '-')} 00:00:00, {year}-{data[1].replace('.', '-')} 23:59:59"
+        }
+    )
 
-    allowed_sources = []
-    extra_ids = {5, 39}
+    if result['data'] == []:
+        return None, '⚠️Неможливо отримати виписку за цей період, немає замовлень'
 
-    for source in sources_response["data"]:
-        source_name = (source.get("name") or "").strip().lower()
-        source_id = source.get("id")
+    google_prices = google_loader.get_prices()
 
-        if source_name.startswith("посередник") or source_id in extra_ids:
-            allowed_sources.append((source_id, source.get("name")))
+    workbook = xlsxwriter.Workbook(f'{uuid.uuid4()}.xlsx')
+    worksheet = workbook.add_worksheet('Замовлення')
 
-    if not allowed_sources:
-        return None, "⚠️ Не знайдено джерел для формування звіту"
+    merge_format = workbook.add_format({"align": "center","valign": "vcenter","fg_color": "#BDD7EE"})
 
-    workbook = xlsxwriter.Workbook(f"{uuid.uuid4()}.xlsx")
+    bold = workbook.add_format({'bold': True})
+    bold_red = workbook.add_format({'bold': True, 'color': 'red'})
 
-    has_any_orders = False
-    period = _build_period(year, data)
+    bold_italic_color_center = workbook.add_format(
+        {'bold': True,'italic': True,'fg_color': '#E2EFDA','align': 'center','border_color': '#2F75B5','bottom': 2}
+    )
 
-    for source_id, source_name in allowed_sources:
-        result = await swagger.get_request(
-            '/order',
-            limit=50,
-            include='shipping, buyer, products.offer, shipping.deliveryService, status',
-            **{
-                "filter[source_id]": source_id,
-                "filter[created_between]": period
-            }
-        )
+    bold_italic_color = workbook.add_format(
+        {'bold': True,'italic': True,'fg_color': '#E2EFDA','border_color': '#2F75B5','bottom': 2}
+    )
 
-        source_orders = []
+    color = workbook.add_format({'fg_color': '#E2EFDA','border_color': '#2F75B5','border': 1})
 
-        while result:
-            source_orders.extend(result.get("data", []))
-            next_page_url = result.get("next_page_url")
+    color_num = workbook.add_format(
+        {'fg_color': '#E2EFDA','border_color': '#2F75B5','border': 1,'num_format': '#,##0.00'}
+    )
 
-            if next_page_url:
-                result = await swagger.get_request_url(next_page_url)
+    green_color = workbook.add_format({'bold': True,'fg_color': '#2AF634','num_format': '#,##0.00'})
+
+    worksheet.merge_range("A1:N1","",merge_format)
+
+    worksheet.write_rich_string(
+        "A1",
+        bold,f"Замовлення: {source_name} ",
+        bold_red,f"(за період {year}.{data[0]} - {data[1]})",
+        merge_format
+    )
+
+    worksheet.write_row(
+        "A2",
+        ["№","Дата","ПІБ","Телефон","Адреса","ТТН","Статус","Код товару","Назва товару"],
+        bold_italic_color_center
+    )
+
+    worksheet.write_row(
+        "J2",
+        ["К-сть (шт.)","Партнерська ціна (грн./шт.)","Ціна виробника (грн./шт.)","Ціна продажу (грн./шт.)"],
+        bold_italic_color
+    )
+
+    worksheet.write("N2","Заробіток",green_color)
+
+    row = 3
+    products = {}
+
+    while result and (result['next_page_url'] or result['total'] <= 50):
+
+        for order in result['data']:
+
+            address = order['shipping']['address_payload']
+
+            if address != []:
+                location = f"{address.get('city_desc')}, {address.get('warehouse_desc')}"
             else:
-                result = None
+                location = ""
 
-        if source_orders:
-            has_any_orders = True
+            worksheet.write_row(
+                f"A{row}",
+                [
+                    order['id'],
+                    order['created_at'][:10].replace('-', '.'),
+                    order['buyer']['full_name'],
+                    order['buyer']['phone'].replace('+38',''),
+                    location,
+                    order['shipping'].get('tracking_code')
+                ],
+                color
+            )
 
-        sheet_name = _safe_sheet_name(f"{source_name}_{data[0]}-{data[1]}")
-        worksheet = workbook.add_worksheet(sheet_name)
+            worksheet.write(f"G{row}",status[order['status']['alias']]['name'],color)
 
-        partner_prices = await repo.get_partner_prices(source_id)
+            last_row = row
 
-        _write_partner_sheet(
-            workbook,
-            worksheet,
-            source_name,
-            source_orders,
-            data,
-            year,
-            partner_prices=partner_prices
-        )
+            for product in order['products']:
+
+                sku = product['sku']
+
+                if source_id == 8:
+                    partner_price = google_prices.get(sku, product['purchased_price'])
+                else:
+                    partner_price = product['purchased_price']
+
+                if not products.get(sku):
+                    products[sku] = {'name': product['name'],'quantity': product['quantity']}
+                else:
+                    products[sku]['quantity'] += product['quantity']
+
+                if row != last_row:
+                    worksheet.write_row(f"A{row}",['','','','','','',''],color)
+
+                worksheet.write_row(
+                    f"H{row}",
+                    [sku,product['name'],product['quantity']],
+                    color
+                )
+
+                worksheet.write_row(
+                    f"K{row}",
+                    [partner_price,product['price'],product['price_sold']],
+                    color_num
+                )
+
+                worksheet.write(f"N{row}",f"=M{row}*J{row}-K{row}*J{row}",green_color)
+
+                row += 1
+
+        if result['next_page_url']:
+            result = await swagger.get_request_url(result['next_page_url'])
+        else:
+            result = None
 
     workbook.close()
 
-    if not has_any_orders:
-        try:
-            import os
-            os.remove(workbook.filename)
-        except Exception:
-            pass
-        return None, "⚠️ Немає замовлень у жодного партнера за цей період"
-
     return workbook.filename, None
-async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, data: list, year: int):
-    result = await swagger.get_request('/order', limit=50, include='shipping, buyer, products.offer, shipping.deliveryService, status', **{"filter[source_id]": source_id, "filter[created_between]": f"{year}-{data[0].replace('.', '-')} 00:00:00, {year}-{data[1].replace('.', '-')} 23:59:59"})
-    if result['data'] != []:
-        workbook = xlsxwriter.Workbook(f'{uuid.uuid4()}.xlsx')
-        worksheet = workbook.add_worksheet('Замовлення')
-
-        merge_format = workbook.add_format(
-            {
-                "align": "center",
-                "valign": "vcenter",
-                "fg_color": "#BDD7EE",
-            }
-        )
-
-        bold = workbook.add_format({'bold': True})
-        bold_red = workbook.add_format({'bold': True, 'color': 'red'})
-        bold_italic_color_center = workbook.add_format(
-            {'bold': True, 'italic': True, 'fg_color': '#E2EFDA', 'align': 'center', 'border_color': '#2F75B5',
-             'bottom': 2})
-        bold_italic_color = workbook.add_format(
-            {'bold': True, 'italic': True, 'fg_color': '#E2EFDA', 'border_color': '#2F75B5', 'bottom': 2})
-        color = workbook.add_format({'fg_color': '#E2EFDA', 'border_color': '#2F75B5', 'border': 1})
-        color_num = workbook.add_format(
-            {'fg_color': '#E2EFDA', 'border_color': '#2F75B5', 'border': 1, 'num_format': '#,##0.00'})
-        green_color = workbook.add_format({'bold': True, 'fg_color': '#2AF634', 'num_format': '#,##0.00'})
-        green_color_14 = workbook.add_format(
-            {'bold': True, 'fg_color': '#00B015', 'font_size': 14, 'num_format': '#,##0.00'})
-        products_sum_14 = workbook.add_format(
-            {'bold': True, 'fg_color': '009fff', 'font_size': 14, 'num_format': '#,##0.00'})
-        global baf5b5, e3e0ff, ffd3cc, ffd7a2
-        baf5b5 = workbook.add_format({'fg_color': '#baf5b5', 'border_color': '#2F75B5', 'border': 1})
-        e3e0ff = workbook.add_format({'fg_color': '#e3e0ff', 'border_color': '#2F75B5', 'border': 1})
-        ffd3cc = workbook.add_format({'fg_color': '#ffd3cc', 'border_color': '#2F75B5', 'border': 1})
-        ffd7a2 = workbook.add_format({'fg_color': '#ffd7a2', 'border_color': '#2F75B5', 'border': 1})
-
-        worksheet.set_column("A0:A0", 6)
-        worksheet.set_column("B0:B0", 10)
-        worksheet.set_column("C0:C0", 16)
-        worksheet.set_column("D0:D0", 11)
-        worksheet.set_column("E0:F0", 16)
-        worksheet.set_column("G0:G0", 14)
-        worksheet.set_column("H0:H0", 16)
-        worksheet.set_column("I0:I0", 25)
-        worksheet.set_column("J0:J0", 8)
-        worksheet.set_column("K0:M0", 23)
-        worksheet.set_column("N0:N0", 16)
-
-        worksheet.merge_range("A1:N1", "", merge_format)
-        worksheet.write_rich_string("A1", bold, f"Замовлення: {source_name} ", bold_red, f"(за період 2026.{data[0]} - {data[1]})", merge_format)
-        worksheet.write_row("A2",
-                            ["№", "Дата", "ПІБ", "Телефон", "Адреса", "ТТН", "Статус", "Код товару", "Назва товару"],
-                            bold_italic_color_center)
-        worksheet.write_row("J2",
-                            ["К-сть (шт.)", "Партнерська ціна (грн./шт.)", "Ціна виробника (грн./шт.)", "Ціна продажу (грн./шт.)"],
-                            bold_italic_color)
-        worksheet.write("N2", "Заробіток", green_color)
-        row = 3
-        products = {}
-
-        while result and (result['next_page_url'] or result['total'] <= 50):
-            for order in result['data']:
-
-                try:
-                    address = order['shipping']['address_payload']
-                    if address != []:
-                        location = f"""{f"{address.get('region_desc')}, " if address.get('region_desc') else ''}{address.get('city_desc')}, {address.get('warehouse_desc')}"""
-                    else:
-                        location = ""
-                except Exception as e:
-                    logging.info(e)
-                    continue
-
-                worksheet.write_row(f"A{row}", [order['id'], order['created_at'][:10].replace('-', '.'),
-                                                order['buyer']['full_name'],
-                                                order['buyer']['phone'].replace('+38', ''), location,
-                                                order['shipping'].get('tracking_code')], color)
-                worksheet.write(f"G{row}", status[order['status']['alias']]['name'],
-                                globals()[status[order['status']['alias']]['color']])
-                worksheet.write(f"N{row}", f"=M{row}*J{row}-K{row}*J{row}", green_color)
-                last_row = row
-                for product in order['products']:
-                    if not products.get(product['sku']):
-                        products[product['sku']] = {'name': product['name'], 'quantity': product['quantity']}
-                    else:
-                        products[product['sku']]['quantity'] += product['quantity']
-
-                    if row != last_row:
-                        worksheet.write_row(f"A{row}", ['', '', '', '', '', '', ''], color)
-                    worksheet.write_row(f"H{row}", [product['sku'], product['name'], product['quantity']], color)
-                    if order['status']['alias'] in ('povernennya', 'canceled', 'dubl_zamovlennya'):
-                        worksheet.write_row(f"K{row}", [product['purchased_price'], product['price'], product['price_sold']], color_num)
-                        worksheet.write(f"N{row}", 0, green_color)
-                    else:
-                        worksheet.write_row(f"K{row}",
-                                            [product['purchased_price'], product['price'], product['price_sold']],
-                                            color_num)
-                        worksheet.write(f"N{row}", f"=M{row}*J{row}-K{row}*J{row}", green_color)
-                    row += 1
-
-            if result['next_page_url']:
-                result = await swagger.get_request_url(result['next_page_url'])
-            else:
-                result = None
-
-        worksheet.write_row(f"A{row}", ["", "", "", "", "", "", "", "", "", "", f"=SUMPRODUCT(J3:J{row - 1},K3:K{row - 1})", "", f"=SUMPRODUCT(J3:J{row - 1},M3:M{row - 1})"], products_sum_14)
-        worksheet.write(f"N{row}", f"=(SUM(N3:N{row - 1}))", green_color_14)
-
-        worksheet.autofilter('A2:M2')
-
-        worksheet_result = workbook.add_worksheet('Підсумок')
-
-        worksheet_result.set_column("A0:A0", 10)
-        worksheet_result.set_column("B0:B0", 60)
-        worksheet_result.set_column("C0:C0", 24)
-
-        worksheet_result.merge_range("A1:C1", "", merge_format)
-        worksheet_result.write_rich_string("A1", bold, f"Підсумок проданих товарів: {source_name} ", bold_red, f"(за період 2026.{data[0]} - {data[1]})", merge_format)
-
-        worksheet_result.write_row("A2", ["Код товару", "Назва товару", "К-сть (шт.)"], bold_italic_color_center)
-        row = 3
-        for product in products.keys():
-            worksheet_result.write_row(f"A{row}", [product, products[product]['name'], products[product]['quantity']], color)
-            row += 1
-
-        worksheet.autofilter('A2:D2')
-
-        workbook.close()
-
-        return workbook.filename, None
-
-    return None, '⚠️Неможливо отримати виписку за цей період, немає замовлень'
-
 async def orders_to_channel(session_factory, swagger: SwaggerCRM, bot: Bot, config: Config):
     async with session_factory() as session:
         repo = Repo(session)
