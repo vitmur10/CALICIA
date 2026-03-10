@@ -5,7 +5,7 @@ from google.oauth2.service_account import Credentials
 class GoogleSheetsPriceLoader:
 
     def __init__(self):
-        self.credentials_path = "'/root/bot/bot/api/keycrm-prices-reader-b0f8fcd69a6f.json'"
+        self.credentials_path = "/root/bot/bot/api/keycrm-prices-reader-b0f8fcd69a6f.json"
         self.sheet_id = "1kuUmOVnh_ofoTrAjkwAzSpn3gWLfB04NcRKgphZk6AE"
         self.worksheet_name = "Аркуш1"
 
