@@ -599,12 +599,46 @@ async def add_order(
     await state.clear()
 
     if res.get('status_code') in (200, 201) or res.get('id'):
-        await query.message.edit_text(
-            '✅ Замовлення успішно створено.',
-            reply_markup=kb.start_order()
+        order_id = res.get('id')
+
+        await state.clear()
+
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+
+        await query.message.answer(
+            f'✅ <b>Ваше замовлення успішно оформлене!</b>\n'
+            f'Номер замовлення: <b>№{order_id}</b>',
+            reply_markup=kb.menu()
         )
+
+        await query.answer('Замовлення успішно оформлене')
+
     else:
-        await query.message.edit_text(
-            f'⚠️ Не вдалося створити замовлення.\n\nВідповідь CRM:\n{res}',
-            reply_markup=kb.start_order()
+        await state.clear()
+
+        error_text = res.get('message') or res.get('errors') or res
+
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+
+        await query.message.answer(
+            f'⚠️ <b>Не вдалося створити замовлення.</b>\n'
+            f'Спробуйте ще раз або зверніться до менеджера.',
+            reply_markup=kb.menu()
         )
+
+        await bot.send_message(
+            chat_id=config.channel.errors,
+            text=(
+                f'⛔️ Помилка при створенні замовлення\n'
+                f'Користувач: {query.from_user.full_name} - <code>{query.from_user.id}</code>\n'
+                f'Відповідь CRM: <code>{error_text}</code>'
+            )
+        )
+
+        await query.answer('Сталася помилка', show_alert=True)
