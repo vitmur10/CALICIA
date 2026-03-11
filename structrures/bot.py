@@ -392,7 +392,7 @@ async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, d
         }
     )
 
-    if result['data'] == []:
+    if not result or result.get('data') == []:
         return None, '⚠️Неможливо отримати виписку за цей період, немає замовлень'
 
     google_prices = google_loader.get_prices()
@@ -400,115 +400,127 @@ async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, d
     workbook = xlsxwriter.Workbook(f'{uuid.uuid4()}.xlsx')
     worksheet = workbook.add_worksheet('Замовлення')
 
-    merge_format = workbook.add_format({"align": "center","valign": "vcenter","fg_color": "#BDD7EE"})
-
+    merge_format = workbook.add_format({"align": "center", "valign": "vcenter", "fg_color": "#BDD7EE"})
     bold = workbook.add_format({'bold': True})
     bold_red = workbook.add_format({'bold': True, 'color': 'red'})
 
     bold_italic_color_center = workbook.add_format(
-        {'bold': True,'italic': True,'fg_color': '#E2EFDA','align': 'center','border_color': '#2F75B5','bottom': 2}
+        {'bold': True, 'italic': True, 'fg_color': '#E2EFDA', 'align': 'center', 'border_color': '#2F75B5', 'bottom': 2}
     )
 
     bold_italic_color = workbook.add_format(
-        {'bold': True,'italic': True,'fg_color': '#E2EFDA','border_color': '#2F75B5','bottom': 2}
+        {'bold': True, 'italic': True, 'fg_color': '#E2EFDA', 'border_color': '#2F75B5', 'bottom': 2}
     )
 
-    color = workbook.add_format({'fg_color': '#E2EFDA','border_color': '#2F75B5','border': 1})
+    color = workbook.add_format({'fg_color': '#E2EFDA', 'border_color': '#2F75B5', 'border': 1})
+    color_num = workbook.add_format({'fg_color': '#E2EFDA', 'border_color': '#2F75B5', 'border': 1, 'num_format': '#,##0.00'})
+    green_color = workbook.add_format({'bold': True, 'fg_color': '#2AF634', 'num_format': '#,##0.00'})
 
-    color_num = workbook.add_format(
-        {'fg_color': '#E2EFDA','border_color': '#2F75B5','border': 1,'num_format': '#,##0.00'}
-    )
-
-    green_color = workbook.add_format({'bold': True,'fg_color': '#2AF634','num_format': '#,##0.00'})
-
-    worksheet.merge_range("A1:N1","",merge_format)
+    worksheet.merge_range("A1:N1", "", merge_format)
 
     worksheet.write_rich_string(
         "A1",
-        bold,f"Замовлення: {source_name} ",
-        bold_red,f"(за період {year}.{data[0]} - {data[1]})",
+        bold, f"Замовлення: {source_name} ",
+        bold_red, f"(за період {year}.{data[0]} - {data[1]})",
         merge_format
     )
 
     worksheet.write_row(
         "A2",
-        ["№","Дата","ПІБ","Телефон","Адреса","ТТН","Статус","Код товару","Назва товару"],
+        ["№", "Дата", "ПІБ", "Телефон", "Адреса", "ТТН", "Статус", "Код товару", "Назва товару"],
         bold_italic_color_center
     )
 
     worksheet.write_row(
         "J2",
-        ["К-сть (шт.)","Партнерська ціна (грн./шт.)","Ціна виробника (грн./шт.)","Ціна продажу (грн./шт.)"],
+        ["К-сть (шт.)", "Партнерська ціна (грн./шт.)", "Ціна виробника (грн./шт.)", "Ціна продажу (грн./шт.)"],
         bold_italic_color
     )
 
-    worksheet.write("N2","Заробіток",green_color)
+    worksheet.write("N2", "Заробіток", green_color)
 
     row = 3
     products = {}
 
-    while result and (result['next_page_url'] or result['total'] <= 50):
+    while result and (result.get('next_page_url') or result.get('total', 0) <= 50):
 
-        for order in result['data']:
+        for order in result.get('data', []):
 
-            address = order['shipping']['address_payload']
+            buyer = order.get('buyer') or {}
+            shipping = order.get('shipping') or {}
+            status_data = order.get('status') or {}
 
-            if address != []:
-                location = f"{address.get('city_desc')}, {address.get('warehouse_desc')}"
+            address = shipping.get('address_payload')
+
+            if isinstance(address, dict):
+                location = f"{address.get('city_desc', '')}, {address.get('warehouse_desc', '')}".strip(", ")
             else:
                 location = ""
+
+            created_at = (order.get('created_at') or '')[:10].replace('-', '.')
+            full_name = buyer.get('full_name', '—')
+            phone = (buyer.get('phone') or '').replace('+38', '')
+            tracking_code = shipping.get('tracking_code', '')
+            status_alias = status_data.get('alias')
+            status_name = status.get(status_alias, {}).get('name', status_alias or '—')
 
             worksheet.write_row(
                 f"A{row}",
                 [
-                    order['id'],
-                    order['created_at'][:10].replace('-', '.'),
-                    order['buyer']['full_name'],
-                    order['buyer']['phone'].replace('+38',''),
+                    order.get('id', ''),
+                    created_at,
+                    full_name,
+                    phone,
                     location,
-                    order['shipping'].get('tracking_code')
+                    tracking_code
                 ],
                 color
             )
 
-            worksheet.write(f"G{row}",status[order['status']['alias']]['name'],color)
+            worksheet.write(f"G{row}", status_name, color)
 
             last_row = row
 
-            for product in order['products']:
+            for product in order.get('products', []):
 
-                sku = product['sku']
+                sku = product.get('sku', '')
 
                 if source_id == 8:
-                    partner_price = google_prices.get(sku, product['purchased_price'])
+                    partner_price = google_prices.get(sku, product.get('purchased_price', 0))
                 else:
-                    partner_price = product['purchased_price']
+                    partner_price = product.get('purchased_price', 0)
 
                 if not products.get(sku):
-                    products[sku] = {'name': product['name'],'quantity': product['quantity']}
+                    products[sku] = {
+                        'name': product.get('name', ''),
+                        'quantity': product.get('quantity', 0)
+                    }
                 else:
-                    products[sku]['quantity'] += product['quantity']
+                    products[sku]['quantity'] += product.get('quantity', 0)
 
                 if row != last_row:
-                    worksheet.write_row(f"A{row}",['','','','','','',''],color)
+                    worksheet.write_row(f"A{row}", ['', '', '', '', '', '', ''], color)
 
                 worksheet.write_row(
                     f"H{row}",
-                    [sku,product['name'],product['quantity']],
+                    [sku, product.get('name', ''), product.get('quantity', 0)],
                     color
                 )
 
                 worksheet.write_row(
                     f"K{row}",
-                    [partner_price,product['price'],product['price_sold']],
+                    [partner_price, product.get('price', 0), product.get('price_sold', 0)],
                     color_num
                 )
 
-                worksheet.write(f"N{row}",f"=M{row}*J{row}-K{row}*J{row}",green_color)
+                if status_alias in ('povernennya', 'canceled', 'dubl_zamovlennya'):
+                    worksheet.write(f"N{row}", 0, green_color)
+                else:
+                    worksheet.write(f"N{row}", f"=M{row}*J{row}-K{row}*J{row}", green_color)
 
                 row += 1
 
-        if result['next_page_url']:
+        if result.get('next_page_url'):
             result = await swagger.get_request_url(result['next_page_url'])
         else:
             result = None
