@@ -28,7 +28,13 @@ status = {
     'canceled': {'name': 'Відхилено', 'color': 'ffd3cc'},
     'dubl_zamovlennya': {'name': 'Дубль', 'color': 'ffd3cc'}
 }
-
+NON_COUNTABLE_STATUSES = {
+    'povernennya',
+    'canceled',
+    'dubl_zamovlennya',
+    'testove',
+    'test',
+}
 
 def _safe_sheet_name(name: str) -> str:
     name = re.sub(r'[\[\]\:\*\?\/\\]', '_', name).strip()
@@ -229,13 +235,14 @@ def _write_partner_sheet(
         for product in order['products']:
             sku = product['sku']
             partner_price = partner_prices.get(sku, product['purchased_price'])
-            if sku not in products_summary:
-                products_summary[sku] = {
-                    "name": product['name'],
-                    "quantity": product['quantity']
-                }
-            else:
-                products_summary[sku]["quantity"] += product['quantity']
+            if status_alias not in NON_COUNTABLE_STATUSES:
+                if sku not in products_summary:
+                    products_summary[sku] = {
+                        "name": product['name'],
+                        "quantity": product['quantity']
+                    }
+                else:
+                    products_summary[sku]["quantity"] += product['quantity']
 
             if row != first_row_for_order:
                 worksheet.write_row(f"A{row}", ['', '', '', '', '', '', ''], formats["cell"])
@@ -252,7 +259,7 @@ def _write_partner_sheet(
                 formats["cell_num"]
             )
 
-            if status_alias in ('povernennya', 'canceled', 'dubl_zamovlennya'):
+            if status_alias in NON_COUNTABLE_STATUSES:
                 worksheet.write(f"N{row}", 0, formats["green"])
             else:
                 worksheet.write(f"N{row}", f"=M{row}*J{row}-K{row}*J{row}", formats["green"])
@@ -497,13 +504,14 @@ async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, d
                 else:
                     partner_price = product.get('purchased_price', 0)
 
-                if not products.get(sku):
-                    products[sku] = {
-                        'name': product.get('name', ''),
-                        'quantity': product.get('quantity', 0)
-                    }
-                else:
-                    products[sku]['quantity'] += product.get('quantity', 0)
+                if status_alias not in NON_COUNTABLE_STATUSES:
+                    if not products.get(sku):
+                        products[sku] = {
+                            'name': product.get('name', ''),
+                            'quantity': product.get('quantity', 0)
+                        }
+                    else:
+                        products[sku]['quantity'] += product.get('quantity', 0)
 
                 if row != last_row:
                     worksheet.write_row(f"A{row}", ['', '', '', '', '', '', ''], color)
@@ -520,7 +528,7 @@ async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, d
                     color_num
                 )
 
-                if status_alias in ('povernennya', 'canceled', 'dubl_zamovlennya'):
+                if status_alias in NON_COUNTABLE_STATUSES:
                     worksheet.write(f"N{row}", 0, green_color)
                 else:
                     worksheet.write(f"N{row}", f"=M{row}*J{row}-K{row}*J{row}", green_color)
