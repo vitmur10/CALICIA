@@ -532,7 +532,36 @@ async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, d
             result = await swagger.get_request_url(result['next_page_url'])
         else:
             result = None
+    worksheet_result = workbook.add_worksheet('Підсумок')
 
+    worksheet_result.set_column("A0:A0", 10)
+    worksheet_result.set_column("B0:B0", 60)
+    worksheet_result.set_column("C0:C0", 24)
+
+    worksheet_result.merge_range("A1:C1", "", merge_format)
+    worksheet_result.write_rich_string(
+        "A1",
+        bold, f"Підсумок проданих товарів: {source_name} ",
+        bold_red, f"(за період {year}.{data[0]} - {data[1]})",
+        merge_format
+    )
+
+    worksheet_result.write_row(
+        "A2",
+        ["Код товару", "Назва товару", "К-сть (шт.)"],
+        bold_italic_color_center
+    )
+
+    summary_row = 3
+    for sku, product_data in products.items():
+        worksheet_result.write_row(
+            f"A{summary_row}",
+            [sku, product_data['name'], product_data['quantity']],
+            color
+        )
+        summary_row += 1
+
+    worksheet_result.autofilter("A2:C2")
     workbook.close()
 
     return workbook.filename, None
