@@ -181,38 +181,46 @@ def _write_partner_sheet(
     products_summary = {}
 
     for order in orders:
-        try:
-            address = order['shipping']['address_payload']
-            if address != []:
-                location = (
-                    f"{address.get('region_desc') + ', ' if address.get('region_desc') else ''}"
-                    f"{address.get('city_desc')}, {address.get('warehouse_desc')}"
-                )
-            else:
-                location = ""
-        except Exception as e:
-            logging.info(e)
-            continue
+        shipping = order.get('shipping') or {}
+        address = shipping.get('address_payload')
+
+        if isinstance(address, dict):
+            location = (
+                f"{address.get('region_desc') + ', ' if address.get('region_desc') else ''}"
+                f"{address.get('city_desc', '')}, {address.get('warehouse_desc', '')}"
+            ).strip(', ')
+        else:
+            location = ""
+
+        buyer = order.get('buyer') or {}
+        shipping = order.get('shipping') or {}
+        status_data = order.get('status') or {}
+
+        created_at = (order.get('created_at') or '')[:10].replace('-', '.')
+        full_name = buyer.get('full_name', '—')
+        phone = (buyer.get('phone') or '').replace('+38', '')
+        tracking_code = shipping.get('tracking_code', '')
 
         worksheet.write_row(
             f"A{row}",
             [
-                order['id'],
-                order['created_at'][:10].replace('-', '.'),
-                order['buyer']['full_name'],
-                order['buyer']['phone'].replace('+38', ''),
+                order.get('id', ''),
+                created_at,
+                full_name,
+                phone,
                 location,
-                order['shipping'].get('tracking_code')
+                tracking_code
             ],
             formats["cell"]
         )
 
-        status_alias = order['status']['alias']
+        status_alias = status_data.get('alias')
         color_key = status.get(status_alias, {}).get('color', 'baf5b5')
         status_format = formats.get(f"status_{color_key}", formats["cell"])
+
         worksheet.write(
             f"G{row}",
-            status.get(status_alias, {}).get('name', status_alias),
+            status.get(status_alias, {}).get('name', status_alias or '—'),
             status_format
         )
 
