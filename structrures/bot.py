@@ -361,11 +361,10 @@ async def generate_all_partners_file(swagger: SwaggerCRM, repo: Repo, data: list
         worksheet = workbook.add_worksheet(sheet_name)
 
         # стандартні ціни партнерів
-        partner_prices = await repo.get_partner_prices(source_id)
-
-        # якщо це партнер 8 → беремо Google ціни
         if source_id == 8:
             partner_prices = google_prices
+        else:
+            partner_prices = {}
 
         _write_partner_sheet(
             workbook,
