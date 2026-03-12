@@ -36,6 +36,26 @@ NON_COUNTABLE_STATUSES = {
     'test',
 }
 
+
+def normalize_status_alias(order: dict) -> str:
+    status_alias = (
+        order.get('status_alias')
+        or order.get('status')
+        or order.get('status_code')
+        or ''
+    )
+    return str(status_alias).strip().lower()
+
+def get_status_alias(order: dict) -> str:
+    status_data = order.get('status') or {}
+    status_alias = (
+        status_data.get('alias')
+        or order.get('status_alias')
+        or order.get('status')
+        or order.get('status_code')
+        or ''
+    )
+    return str(status_alias).strip().lower()
 def _safe_sheet_name(name: str) -> str:
     name = re.sub(r'[\[\]\:\*\?\/\\]', '_', name).strip()
     return name[:31] if len(name) > 31 else name
@@ -221,6 +241,7 @@ def _write_partner_sheet(
         )
 
         status_alias = status_data.get('alias')
+        current_status_alias = get_status_alias(order)
         color_key = status.get(status_alias, {}).get('color', 'baf5b5')
         status_format = formats.get(f"status_{color_key}", formats["cell"])
 
@@ -235,7 +256,7 @@ def _write_partner_sheet(
         for product in order['products']:
             sku = product['sku']
             partner_price = partner_prices.get(sku, product['purchased_price'])
-            if status_alias not in NON_COUNTABLE_STATUSES:
+            if current_status_alias not in NON_COUNTABLE_STATUSES:
                 if sku not in products_summary:
                     products_summary[sku] = {
                         "name": product['name'],
@@ -259,7 +280,7 @@ def _write_partner_sheet(
                 formats["cell_num"]
             )
 
-            if status_alias in NON_COUNTABLE_STATUSES:
+            if current_status_alias in NON_COUNTABLE_STATUSES:
                 worksheet.write(f"N{row}", 0, formats["green"])
             else:
                 worksheet.write(f"N{row}", f"=M{row}*J{row}-K{row}*J{row}", formats["green"])
@@ -476,6 +497,7 @@ async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, d
             phone = (buyer.get('phone') or '').replace('+38', '')
             tracking_code = shipping.get('tracking_code', '')
             status_alias = status_data.get('alias')
+            current_status_alias = get_status_alias(order)
             status_name = status.get(status_alias, {}).get('name', status_alias or '—')
 
             worksheet.write_row(
@@ -504,7 +526,7 @@ async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, d
                 else:
                     partner_price = product.get('purchased_price', 0)
 
-                if status_alias not in NON_COUNTABLE_STATUSES:
+                if current_status_alias not in NON_COUNTABLE_STATUSES:
                     if not products.get(sku):
                         products[sku] = {
                             'name': product.get('name', ''),
@@ -528,7 +550,7 @@ async def generate_file(swagger: SwaggerCRM, source_id: int, source_name: str, d
                     color_num
                 )
 
-                if status_alias in NON_COUNTABLE_STATUSES:
+                if current_status_alias in NON_COUNTABLE_STATUSES:
                     worksheet.write(f"N{row}", 0, green_color)
                 else:
                     worksheet.write(f"N{row}", f"=M{row}*J{row}-K{row}*J{row}", green_color)
