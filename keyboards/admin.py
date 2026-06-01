@@ -1,6 +1,7 @@
+import calendar
 from aiogram.filters.callback_data import CallbackData
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from datetime import date, timedelta, datetime
+from datetime import datetime
 from bot.db.models import User
 from bot.structrures.callback_data import UserData, AdminExtractAllData
 from bot.structrures.bot import months
@@ -105,12 +106,11 @@ def all_partners_weeks(month: int, year: int):
     else:
         kb.button(text=' ', callback_data='noop')
 
-    for i in range(5 if month in (2, 5, 7, 10) else 4):
-        today = date(year=year, month=month + 1, day=i * 7 + 1)
-        weekday = today.weekday()
+    month_weeks = calendar.Calendar(firstweekday=0).monthdatescalendar(year, month + 1)
 
-        start_of_week = today - timedelta(days=weekday)
-        end_of_week = start_of_week + timedelta(days=6)
+    for week in month_weeks:
+        start_of_week = week[0]
+        end_of_week = week[6]
 
         kb.button(
             text=f'{start_of_week.day} - {end_of_week.day}',
@@ -123,5 +123,5 @@ def all_partners_weeks(month: int, year: int):
 
     kb.button(text='« Назад', callback_data='admin_menu')
 
-    kb.adjust(3, 2, 2, 1)
+    kb.adjust(3, *[2] * len(month_weeks), 1)
     return kb.as_markup()
